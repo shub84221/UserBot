@@ -11,47 +11,46 @@ import os
 
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.types import MessageEntityMentionName
-from userbot import CMD_HELP
+from userbot import CMD_HELP, TEMP_DOWNLOAD_DIRECTORY
 from userbot.events import register
-
-TMP_DOWNLOAD_DIRECTORY = "./"
 
 
 @register(pattern=".whois(?: |$)(.*)", outgoing=True)
 async def who(event):
-    """ For .whois command, get info about a user. """
-    if event.fwd_from:
-        return
+    if not event.text[0].isalpha() and event.text[0] not in ("/", "#", "@", "!"):
+        """ For .whois command, get info about a user. """
+        if event.fwd_from:
+            return
 
-    if not os.path.isdir(TMP_DOWNLOAD_DIRECTORY):
-        os.makedirs(TMP_DOWNLOAD_DIRECTORY)
+        if not os.path.isdir(TEMP_DOWNLOAD_DIRECTORY):
+            os.makedirs(TEMP_DOWNLOAD_DIRECTORY)
 
-    replied_user = await get_user(event)
+        replied_user = await get_user(event)
 
-    photo, caption = await fetch_info(replied_user, event)
+        photo, caption = await fetch_info(replied_user, event)
 
-    message_id_to_reply = event.message.reply_to_msg_id
+        message_id_to_reply = event.message.reply_to_msg_id
 
-    if not message_id_to_reply:
-        message_id_to_reply = None
+        if not message_id_to_reply:
+            message_id_to_reply = None
 
-    try:
-        await event.client.send_file(
-            event.chat_id,
-            photo,
-            caption=caption,
-            link_preview=False,
-            force_document=False,
-            reply_to=message_id_to_reply,
-            parse_mode="html"
-        )
+        try:
+            await event.client.send_file(
+                event.chat_id,
+                photo,
+                caption=caption,
+                link_preview=False,
+                force_document=False,
+                reply_to=message_id_to_reply,
+                parse_mode="html"
+            )
 
-        if not photo.startswith("http"):
-            os.remove(photo)
-        await event.delete()
-        
-    except TypeError:
-        await event.edit(caption, parse_mode="html")
+            if not photo.startswith("http"):
+                os.remove(photo)
+            await event.delete()
+
+        except TypeError:
+            await event.edit(caption, parse_mode="html")
 
 async def get_user(event):
     """ Get the user from argument or replied message. """
@@ -97,7 +96,7 @@ async def fetch_info(replied_user, event):
     verified = replied_user.user.verified
     photo = await event.client.download_profile_photo(
         user_id,
-        TMP_DOWNLOAD_DIRECTORY + str(user_id) + ".jpg",
+        TEMP_DOWNLOAD_DIRECTORY + str(user_id) + ".jpg",
         download_big=True
     )
     first_name = first_name.replace("\u2060", "") if first_name else (
