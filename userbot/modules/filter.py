@@ -6,11 +6,15 @@
 """ Userbot module for filter commands """
 
 from asyncio import sleep
-from re import fullmatch, IGNORECASE
-
+from re import fullmatch, IGNORECASE, escape
+from telethon.tl import types
+from telethon import utils
 from userbot import BOTLOG, BOTLOG_CHATID, CMD_HELP
 from userbot.events import register
 
+TYPE_TEXT = 0
+TYPE_PHOTO = 1
+TYPE_DOCUMENT = 2
 
 @register(incoming=True, disable_edited=True)
 async def filter_incoming_handler(handler):
@@ -22,19 +26,38 @@ async def filter_incoming_handler(handler):
             except AttributeError:
                 await handler.edit("`Running on Non-SQL mode!`")
                 return
-            listes = handler.text.split(" ")
+
+            name = handler.raw_text
             filters = get_filters(handler.chat_id)
+            if not filters:
+                    return
             for trigger in filters:
-                for item in listes:
-                    pro = fullmatch(trigger.keyword, item, flags=IGNORECASE)
-                    if pro:
-                        await handler.reply(trigger.reply)
-                        return
+                pattern = r"( |^|[^\w])" + escape(trigger.keyword) + r"( |$|[^\w])"
+                pro = fullmatch(pattern, name, flags=IGNORECASE)
+                if pro:
+                    if trigger.snip_type == TYPE_PHOTO:
+                        media = types.InputPhoto(
+                            int(trigger.media_id),
+                            int(trigger.media_access_hash),
+                            trigger.media_file_reference
+                        )
+                    elif trigger.snip_type == TYPE_DOCUMENT:
+                        media = types.InputDocument(
+                            int(trigger.media_id),
+                            int(trigger.media_access_hash),
+                            trigger.media_file_reference
+                        )
+                    else:
+                        media = None
+                    await handler.reply(
+                        trigger.reply,
+                        file=media
+                    )
     except AttributeError:
         pass
 
 
-@register(outgoing=True, pattern="^.filter\\s.*")
+@register(outgoing=True, pattern="^.filter (.*)")
 async def add_new_filter(new_handler):
     """ For .filter command, allows adding new filters in a chat """
     if not new_handler.text[0].isalpha() and new_handler.text[0] not in ("/", "#", "@", "!"):
@@ -43,13 +66,32 @@ async def add_new_filter(new_handler):
         except AttributeError:
             await new_handler.edit("`Running on Non-SQL mode!`")
             return
-        message = new_handler.text
-        kek = message.split()
-        string = ""
-        for i in range(2, len(kek)):
-            string = string + " " + str(kek[i])
-        add_filter(str(new_handler.chat_id), kek[1], string)
-        await new_handler.edit("```Filter added successfully```")
+
+        keyword = new_handler.pattern_match.group(1)
+        msg = await new_handler.get_reply_message()
+        if not msg:
+            await new_handler.edit("`I need something to save as reply to the filter.`")
+        else:
+            snip = {'type': TYPE_TEXT, 'text': msg.message or ''}
+            if msg.media:
+                media = None
+                if isinstance(msg.media, types.MessageMediaPhoto):
+                    media = utils.get_input_photo(msg.media.photo)
+                    snip['type'] = TYPE_PHOTO
+                elif isinstance(msg.media, types.MessageMediaDocument):
+                    media = utils.get_input_document(msg.media.document)
+                    snip['type'] = TYPE_DOCUMENT
+                if media:
+                    snip['id'] = media.id
+                    snip['hash'] = media.access_hash
+                    snip['fr'] = media.file_reference
+
+        success = "`Filter` **{}** `{} successfully`"
+
+        if add_filter(str(new_handler.chat_id), keyword, snip['text'], snip['type'], snip.get('id'), snip.get('hash'), snip.get('fr')) is True:
+            await new_handler.edit(success.format(keyword, 'added'))
+        else:
+            await new_handler.edit(success.format(keyword, 'updated'))
 
 
 @register(outgoing=True, pattern="^.stop\\s.*")
@@ -61,31 +103,45 @@ async def remove_a_filter(r_handler):
         except AttributeError:
             await r_handler.edit("`Running on Non-SQL mode!`")
             return
-        message = r_handler.text
-        kek = message.split(" ")
-        remove_filter(r_handler.chat_id, kek[1])
-        await r_handler.edit("```Filter removed successfully```")
+
+        filt = r_handler.text[6:]
+
+        if not remove_filter(r_handler.chat_id, filt):
+            await r_handler.edit("`Filter` **{}** `doesn't exist.`"
+                             .format(filt))
+        else:
+            await r_handler.edit("`Filter` **{}** `was deleted successfully`"
+                             .format(filt))
 
 
-@register(outgoing=True, pattern="^.rmfilters$")
-async def kick_marie_filter(kick):
+@register(outgoing=True, pattern="^.rmfilters (.*)")
+async def kick_marie_filter(event):
     """ For .rmfilters command, allows you to kick all \
         Marie(or her clones) filters from a chat. """
-    if not kick.text[0].isalpha() and kick.text[0] not in ("/", "#", "@", "!"):
-        await kick.edit("```Will be kicking away all Marie filters.```")
-        sleep(3)
-        resp = await kick.get_reply_message()
+    cmd = event.text[0]
+    if not cmd.isalpha() and cmd not in ("/", "#", "@", "!"):
+        bot_type = event.pattern_match.group(1)
+        if bot_type not in ["marie", "rose"]:
+            await event.edit("`That bot is not yet supported!`")
+            return
+        await event.edit("```Will be kicking away all Filters!```")
+        await sleep(3)
+        resp = await event.get_reply_message()
         filters = resp.text.split("-")[1:]
         for i in filters:
-            await kick.reply("/stop %s" % (i.strip()))
+            if bot_type == "marie":
+                await event.reply("/stop %s" % (i.strip()))
+            if bot_type == "rose":
+                i = i.replace('`', '')
+                await event.reply("/stop %s" % (i.strip()))
             await sleep(0.3)
-        await kick.respond(
-            "```Successfully purged Marie filters yaay!```\n Gimme cookies!"
+        await event.respond(
+            "```Successfully purged bots filters yaay!```\n Gimme cookies!"
         )
         if BOTLOG:
-            await kick.client.send_message(
-                BOTLOG_CHATID, "I cleaned all Marie filters at " +
-                str(kick.chat_id)
+            await event.client.send_message(
+                BOTLOG_CHATID, "I cleaned all filters at " +
+                               str(event.chat_id)
             )
 
 
@@ -100,21 +156,27 @@ async def filters_active(event):
             return
         transact = "`There are no filters in this chat.`"
         filters = get_filters(event.chat_id)
-        for i in filters:
-            message = "Active filters in this chat: \n\n"
-            transact = message + "🔹 " + i.keyword + "\n"
+
+        for filt in filters:
+            if transact == "`There are no filters in this chat.`":
+                transact = "Active filters in this chat:\n"
+                transact += "👁️ `{}`\n".format(filt.keyword)
+            else:
+                transact += "👁️ `{}`\n".format(filt.keyword)
+
         await event.edit(transact)
 
+
+
 CMD_HELP.update({
-    "filters": "\
-.filters\
-\nUsage: List all active filters in this chat.\
-\n\n.filter <keyword> <reply message>\
-\nUsage: Add a filter to this chat. \
-The bot will now reply that message whenever 'keyword' is mentioned. \
-If you reply to a sticker with a keyword, the bot will reply with that sticker.\
-\nNOTE: all filter keywords are in lowercase.\
-\n\n.stop <filter>\
-\nUsage: Stops that filter.\
-"
+    "filter": ".filters\
+    \nUsage: Lists all active userbot filters in a chat.\
+    \n\n.filter <keyword>\
+    \nUsage: Saves the replied message as a reply to the 'keyword'.\
+    \nThe bot will reply to the message whenever 'keyword' is mentioned.\
+    \nWorks with everything from files to stickers.\
+    \n\n.stop <filter>\
+    \nUsage: Stops the specified filter.\
+    \n\n.rmfilters <marie/rose>\
+    \nUsage: Removes all filters of Bots(Eg:Marie or Rose) in a chat."
 })
