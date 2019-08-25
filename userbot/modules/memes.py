@@ -21,7 +21,7 @@ from telethon.tl.types import MessageEntityMentionName
 
 from cowpy import cow
 
-from userbot import CMD_HELP, ZALG_LIST
+from userbot import CMD_HELP
 from userbot.events import register
 
 # ================= CONSTANT =================
